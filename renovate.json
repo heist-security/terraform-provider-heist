@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", "helpers:pinGitHubActionDigests"],
+  "minimumReleaseAge": "7 days",
+  "enabledManagers": ["gomod", "github-actions"],
+  "internalChecksFilter": "strict",
+  "postUpdateOptions": ["gomodTidy"],
+  "timezone": "Europe/Oslo",
+  "schedule": ["every weekday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 0,
+  "packageRules": [
+    {
+      "description": "Raise the go directive deliberately, not through dependency updates.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "enabled": false
+    },
+    {
+      "description": "Bypass the cooldown for Go toolchain patches, which carry standard library security fixes that CI and release builds need promptly.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["toolchain"],
+      "matchUpdateTypes": ["patch"],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "A new SDK release usually targets a new API contract. Copy api/openapi.json and api/openapi.lock.json from the same heist-go tag before these PRs pass.",
+      "matchPackageNames": ["github.com/heist-security/heist-go"],
+      "minimumReleaseAge": null
+    },
+    {
+      "groupName": "github-actions",
+      "matchManagers": ["github-actions"]
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "addLabels": ["dependencies", "major"]
+    }
+  ]
+}

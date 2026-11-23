@@ -1,0 +1,116 @@
+name: Release
+
+# Creates a vX.Y.Z tag and GitHub release that the Terraform Registry ingests.
+#
+# 1. build: runs every check and builds the release assets without caches.
+# 2. approve: waits for a reviewer in the protected "release" environment.
+# 3. publish: signs SHA256SUMS with the registry's GPG key, attests the
+#    assets' build provenance, then creates the tag and the release.
+#
+# Requires the GPG_PRIVATE_KEY and GPG_PASSPHRASE secrets in the "release"
+# environment. Their public key must be added to the heist-security namespace
+# in the Terraform Registry.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, for example v0.1.0"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # Release builds never restore caches, to prevent cache poisoning.
+          cache: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+
+      - name: Check
+        run: |
+          make deps
+          GOPROXY=off make check
+
+      - name: Build release assets
+        run: GOPROXY=off scripts/build-release.sh "$VERSION"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: release/
+          if-no-files-found: error
+
+  approve:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions: {}
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - run: echo "Release $VERSION approved"
+
+  publish:
+    needs: [build, approve]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: release
+
+      - name: Sign checksums
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          sums="release/terraform-provider-heist_${VERSION#v}_SHA256SUMS"
+          printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --detach-sign --output "$sums.sig" "$sums"
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*.zip
+
+      - name: Create release
+        # Upload assets to a draft, then publish it: published immutable
+        # releases reject further changes. Publishing creates the tag.
+        run: |
+          gh release create "$VERSION" --draft \
+            --target "$GITHUB_SHA" --title "$VERSION" --generate-notes \
+            release/*
+          gh release edit "$VERSION" --draft=false
