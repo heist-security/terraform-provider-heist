@@ -13,12 +13,22 @@ Reference documentation for each is in [`docs/`](docs/).
 
 ## Using the provider
 
-Create an OAuth app in **Settings → OAuth apps** in Heist and export its access
-token:
+Create an OAuth app in **Settings → OAuth apps** in Heist and export its client
+ID and secret:
 
 ```sh
-export HEIST_ACCESS_TOKEN=...
+export HEIST_CLIENT_ID=...
+export HEIST_CLIENT_SECRET=...
 ```
+
+The provider exchanges them for access tokens and refreshes tokens before they
+expire, so long applies don't outlive a token. To use an access token you
+already have, export `HEIST_ACCESS_TOKEN` instead. Each environment variable
+can also be set as a provider attribute; see [`docs/index.md`](docs/index.md).
+Credentials in the provider configuration take precedence: setting
+`access_token` there ignores `HEIST_CLIENT_ID` and `HEIST_CLIENT_SECRET`, and
+setting `client_id` or `client_secret` ignores `HEIST_ACCESS_TOKEN`. Exporting
+both kinds of credential with neither in the configuration is an error.
 
 ```terraform
 terraform {

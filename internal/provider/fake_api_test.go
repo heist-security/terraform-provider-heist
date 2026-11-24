@@ -15,7 +15,11 @@ import (
 	"github.com/heist-security/heist-go/heist"
 )
 
-const testToken = "test-token"
+const (
+	testToken        = "test-token"
+	testClientID     = "test-client-id"
+	testClientSecret = "test-client-secret"
+)
 
 // fakeAPI is an in-memory Heist API covering the operations the provider
 // uses. Tests seed and inspect its fields directly; lock mu while the
@@ -29,13 +33,21 @@ type fakeAPI struct {
 	scopeCalls int
 	// failScope makes scope updates return a server error.
 	failScope bool
+	// issued holds unused access tokens from the token endpoint. Each is
+	// accepted once, standing in for a token that expires, so a provider that
+	// does not refresh tokens fails on its second request.
+	issued map[string]bool
+	// exchanges counts client credentials exchanges at the token endpoint.
+	exchanges int
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
+	clearCredentialEnv(t)
 	f := &fakeAPI{
-		apps:  map[string]*heist.Application{},
-		rules: map[string]*heist.ScopeRule{},
+		apps:   map[string]*heist.Application{},
+		rules:  map[string]*heist.ScopeRule{},
+		issued: map[string]bool{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /applications", f.createApplication)
@@ -46,12 +58,18 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	mux.HandleFunc("DELETE /scope/rules/{id}", f.deleteScopeRule)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+testToken {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if r.Method == http.MethodPost && r.URL.Path == "/oauth2/token" {
+			f.token(w, r)
+			return
+		}
+		token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if token != testToken && !f.issued[token] {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		f.mu.Lock()
-		defer f.mu.Unlock()
+		delete(f.issued, token)
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
@@ -67,6 +85,28 @@ provider "heist" {
   access_token = %q
 }
 `, f.url, testToken)
+}
+
+// clientCredentialsConfig returns HCL configuring the provider against the
+// fake with client credentials and the fake's token endpoint.
+func (f *fakeAPI) clientCredentialsConfig() string {
+	return fmt.Sprintf(`
+provider "heist" {
+  server_url    = %q
+  token_url     = %q
+  client_id     = %q
+  client_secret = %q
+}
+`, f.url, f.url+"/oauth2/token", testClientID, testClientSecret)
+}
+
+// clearCredentialEnv stops credentials in the developer's environment from
+// affecting provider configuration in tests.
+func clearCredentialEnv(t *testing.T) {
+	t.Helper()
+	for _, env := range []string{"HEIST_ACCESS_TOKEN", "HEIST_CLIENT_ID", "HEIST_CLIENT_SECRET", "HEIST_TOKEN_URL", "HEIST_SERVER_URL"} {
+		t.Setenv(env, "")
+	}
 }
 
 func testProviderFactories() map[string]func() (tfprotov6.ProviderServer, error) {
@@ -162,6 +202,20 @@ func (f *fakeAPI) deleteScopeRule(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(f.rules, r.PathValue("id"))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// token implements the OAuth 2.0 client_credentials grant with HTTP Basic
+// client authentication, as the Heist token endpoint does.
+func (f *fakeAPI) token(w http.ResponseWriter, r *http.Request) {
+	id, secret, ok := r.BasicAuth()
+	if !ok || id != testClientID || secret != testClientSecret || r.PostFormValue("grant_type") != "client_credentials" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_client"})
+		return
+	}
+	f.exchanges++
+	token := fmt.Sprintf("issued-token-%d", f.exchanges)
+	f.issued[token] = true
+	writeJSON(w, http.StatusOK, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": 1})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
