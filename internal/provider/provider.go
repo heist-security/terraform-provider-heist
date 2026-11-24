@@ -45,19 +45,19 @@ func (p *heistProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 			"access_token": schema.StringAttribute{
 				Description: "Access token of a Heist OAuth app. " +
 					"Conflicts with `client_id` and `client_secret`. " +
-					"Defaults to the `HEIST_ACCESS_TOKEN` environment variable.",
+					"Defaults to the `HEIST_ACCESS_TOKEN` environment variable unless `client_id` or `client_secret` is set.",
 				Optional:  true,
 				Sensitive: true,
 			},
 			"client_id": schema.StringAttribute{
 				Description: "Client ID of a Heist OAuth app, created in Settings → OAuth apps. The provider exchanges it and `client_secret` for " +
 					"access tokens and refreshes them before they expire. Requires `client_secret`. " +
-					"Defaults to the `HEIST_CLIENT_ID` environment variable.",
+					"Defaults to the `HEIST_CLIENT_ID` environment variable unless `access_token` is set.",
 				Optional: true,
 			},
 			"client_secret": schema.StringAttribute{
 				Description: "Client secret of a Heist OAuth app. Requires `client_id`. " +
-					"Defaults to the `HEIST_CLIENT_SECRET` environment variable.",
+					"Defaults to the `HEIST_CLIENT_SECRET` environment variable unless `access_token` is set.",
 				Optional:  true,
 				Sensitive: true,
 			},
@@ -89,18 +89,31 @@ func (p *heistProvider) Configure(ctx context.Context, req provider.ConfigureReq
 		return
 	}
 
-	// Each attribute falls back to its own environment variable, and the
-	// credential checks apply to the combined result.
-	token := valueOrEnv(config.AccessToken, "HEIST_ACCESS_TOKEN")
-	clientID := valueOrEnv(config.ClientID, "HEIST_CLIENT_ID")
-	clientSecret := valueOrEnv(config.ClientSecret, "HEIST_CLIENT_SECRET")
+	// Credentials in the provider configuration take precedence: when it sets
+	// one kind, the environment variables for the other kind are ignored.
+	// Each attribute of the chosen kind still falls back to its own
+	// environment variable, so a client ID in configuration can pair with
+	// HEIST_CLIENT_SECRET.
+	token := config.AccessToken.ValueString()
+	clientID := config.ClientID.ValueString()
+	clientSecret := config.ClientSecret.ValueString()
+	configToken := token != ""
+	configClient := clientID != "" || clientSecret != ""
+	if !configClient {
+		token = valueOrEnv(config.AccessToken, "HEIST_ACCESS_TOKEN")
+	}
+	if !configToken {
+		clientID = valueOrEnv(config.ClientID, "HEIST_CLIENT_ID")
+		clientSecret = valueOrEnv(config.ClientSecret, "HEIST_CLIENT_SECRET")
+	}
 
 	var tokens heist.TokenSource
 	switch {
 	case token != "" && (clientID != "" || clientSecret != ""):
 		resp.Diagnostics.AddError("Conflicting Heist credentials",
 			"Set either access_token (HEIST_ACCESS_TOKEN) or client_id and client_secret "+
-				"(HEIST_CLIENT_ID and HEIST_CLIENT_SECRET), not both.")
+				"(HEIST_CLIENT_ID and HEIST_CLIENT_SECRET), not both. Credentials in the provider "+
+				"configuration take precedence over the environment.")
 		return
 	case token != "":
 		tokens = heist.StaticToken(token)

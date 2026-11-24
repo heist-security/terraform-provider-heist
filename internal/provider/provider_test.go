@@ -40,10 +40,9 @@ func TestProvider_credentialValidation(t *testing.T) {
 			want:     `Conflicting Heist credentials`,
 		},
 		{
-			name:     "token in config, client ID in environment",
-			provider: `access_token = "token"`,
-			env:      map[string]string{"HEIST_CLIENT_ID": "id"},
-			want:     `Conflicting Heist credentials`,
+			name: "token and client credentials in environment",
+			env:  map[string]string{"HEIST_ACCESS_TOKEN": "token", "HEIST_CLIENT_ID": "id", "HEIST_CLIENT_SECRET": "secret"},
+			want: `Conflicting Heist credentials`,
 		},
 		{
 			name:     "client ID only",
@@ -68,6 +67,49 @@ func TestProvider_credentialValidation(t *testing.T) {
 					Config:      fmt.Sprintf("provider \"heist\" {\n%s\n}\n", tt.provider) + scopeRuleConfig,
 					ExpectError: regexp.MustCompile(tt.want),
 				}},
+			})
+		})
+	}
+}
+
+// TestProvider_configCredentialsTakePrecedence sets wrong credentials of the
+// other kind in the environment, so the apply succeeds only if the provider
+// ignores them in favour of the credentials in its configuration.
+func TestProvider_configCredentialsTakePrecedence(t *testing.T) {
+	tests := []struct {
+		name   string
+		config func(*fakeAPI) string
+		env    map[string]string
+	}{
+		{
+			name:   "access token in config",
+			config: (*fakeAPI).providerConfig,
+			env:    map[string]string{"HEIST_CLIENT_ID": "wrong-id", "HEIST_CLIENT_SECRET": "wrong-secret"},
+		},
+		{
+			name: "client ID in config, secret in environment",
+			config: func(f *fakeAPI) string {
+				return fmt.Sprintf(`
+provider "heist" {
+  server_url = %q
+  token_url  = %q
+  client_id  = %q
+}
+`, f.url, f.url+"/oauth2/token", testClientID)
+			},
+			env: map[string]string{"HEIST_CLIENT_SECRET": testClientSecret, "HEIST_ACCESS_TOKEN": "wrong-token"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProviderFactories(),
+				Steps:                    []resource.TestStep{{Config: tt.config(api) + scopeRuleConfig, Check: api.checkRuleCount(1)}},
+				CheckDestroy:             api.checkRuleCount(0),
 			})
 		})
 	}
