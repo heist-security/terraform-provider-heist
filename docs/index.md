@@ -20,7 +20,8 @@ terraform {
   }
 }
 
-# Reads the access token from HEIST_ACCESS_TOKEN when access_token is unset.
+# Reads OAuth app credentials from HEIST_CLIENT_ID and HEIST_CLIENT_SECRET, or
+# an access token from HEIST_ACCESS_TOKEN, when they are not set here.
 provider "heist" {}
 ```
 
@@ -29,5 +30,8 @@ provider "heist" {}
 
 ### Optional
 
-- `access_token` (String, Sensitive) Access token of a Heist OAuth app, created in Settings → OAuth apps. Defaults to the `HEIST_ACCESS_TOKEN` environment variable.
+- `access_token` (String, Sensitive) Access token of a Heist OAuth app. Conflicts with `client_id` and `client_secret`. Defaults to the `HEIST_ACCESS_TOKEN` environment variable.
+- `client_id` (String) Client ID of a Heist OAuth app, created in Settings → OAuth apps. The provider exchanges it and `client_secret` for access tokens and refreshes them before they expire. Requires `client_secret`. Defaults to the `HEIST_CLIENT_ID` environment variable.
+- `client_secret` (String, Sensitive) Client secret of a Heist OAuth app. Requires `client_id`. Defaults to the `HEIST_CLIENT_SECRET` environment variable.
 - `server_url` (String) Heist external REST API URL, including the `/external` path prefix. Defaults to the `HEIST_SERVER_URL` environment variable, then to https://api.heisthq.com/external.
+- `token_url` (String) OAuth token endpoint used with `client_id` and `client_secret`. Defaults to the `HEIST_TOKEN_URL` environment variable, then to https://identity.heist.security/oauth2/token.

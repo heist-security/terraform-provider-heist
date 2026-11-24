@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Heist External API",
-    "version": "2.4.0",
-    "description": "Create an OAuth app in Settings → OAuth apps and send its access token in the Authorization: Bearer <token> header. Requests are scoped to the app's workspace and permissions."
+    "version": "2.7.0",
+    "description": "Create an OAuth app in Settings → OAuth apps and send its access token in the Authorization: Bearer <token> header. Exchange the app's client ID and secret for access tokens at https://identity.heist.security/oauth2/token using the OAuth 2.0 client_credentials grant. Requests are scoped to the app's workspace and permissions."
   },
   "servers": [
     {
@@ -13,6 +13,9 @@
   "security": [
     {
       "bearerAuth": []
+    },
+    {
+      "oauth2": []
     }
   ],
   "components": {
@@ -21,6 +24,16 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "description": "OAuth app client credentials. Authenticate to the token endpoint with HTTP Basic (client_secret_basic) or client_id and client_secret form fields (client_secret_post), then send the access token as a Bearer token.",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://identity.heist.security/oauth2/token",
+            "scopes": {}
+          }
+        }
       }
     },
     "schemas": {
@@ -4669,9 +4682,158 @@
       }
     },
     "/reports": {
+      "get": {
+        "operationId": "list_reports",
+        "description": "List existing workspace reports, optionally selecting an exportId returned by generate_report. Report reads require a report-enabled plan; canceled customers retain access to their existing reports.",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "draft",
+                          "finalized"
+                        ]
+                      },
+                      "reportType": {
+                        "type": "string",
+                        "enum": [
+                          "internal",
+                          "customer_facing",
+                          "attestation_letter"
+                        ]
+                      },
+                      "exportFolderId": {
+                        "type": "string"
+                      },
+                      "scopeApplicationId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "scopeApplicationIds": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "lastVersionAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "title",
+                      "status",
+                      "reportType",
+                      "exportFolderId",
+                      "scopeApplicationId",
+                      "createdAt",
+                      "lastVersionAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient workspace permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "operationId": "generate_report",
-        "description": "Generate report exports asynchronously. Requires Admin and a plan with report generation. Omit applicationIds for all in-scope applications, or select exactly which applications to include.",
+        "description": "Generate new full, summary, and attestation PDF reports asynchronously, retaining previous exports. Requires Admin and a plan with report generation. Omit applicationIds for all in-scope applications, or select exactly which applications to include. Poll get_report_export with the returned exportId for completion and report IDs.",
         "x-required-role": "ADMIN",
         "parameters": [],
         "requestBody": {
@@ -4707,10 +4869,505 @@
                   "properties": {
                     "workflowId": {
                       "type": "string"
+                    },
+                    "exportId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     }
                   },
                   "required": [
-                    "workflowId"
+                    "workflowId",
+                    "exportId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient workspace permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/{id}": {
+      "get": {
+        "operationId": "get_report",
+        "description": "Read a workspace report and all retained PDF versions, newest first. Canceled customers retain read access.",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "finalized"
+                      ]
+                    },
+                    "reportType": {
+                      "type": "string",
+                      "enum": [
+                        "internal",
+                        "customer_facing",
+                        "attestation_letter"
+                      ]
+                    },
+                    "exportFolderId": {
+                      "type": "string"
+                    },
+                    "scopeApplicationId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scopeApplicationIds": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reportId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reportId",
+                          "createdAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "status",
+                    "reportType",
+                    "exportFolderId",
+                    "scopeApplicationId",
+                    "createdAt",
+                    "versions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient workspace permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/{id}/download": {
+      "get": {
+        "operationId": "download_report",
+        "description": "Get a one-hour signed PDF download URL for a report version without a browser. Omit versionId for the latest version. Canceled customers retain download access.",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reportId": {
+                      "type": "string"
+                    },
+                    "versionId": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "reportId",
+                    "versionId",
+                    "url",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, expired, or revoked token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient workspace permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/report-exports/{id}": {
+      "get": {
+        "operationId": "get_report_export",
+        "description": "Observe an export using its exportId and list its reports. COMPLETED means the workflow finished writing all PDFs. NOT_FOUND means no retained workflow exists; persisted reports remain available after workflow history expires. Failed workflows can have partial reports and are never reported as successful. Canceled customers retain read access.",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exportId": {
+                      "type": "string"
+                    },
+                    "workflowId": {
+                      "type": "string"
+                    },
+                    "runId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "NOT_FOUND",
+                        "RUNNING",
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "TERMINATED",
+                        "TIMED_OUT",
+                        "CONTINUED_AS_NEW",
+                        "PAUSED",
+                        "UNKNOWN",
+                        "UNSPECIFIED"
+                      ]
+                    },
+                    "startedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "closedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "failure": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "finalized"
+                            ]
+                          },
+                          "reportType": {
+                            "type": "string",
+                            "enum": [
+                              "internal",
+                              "customer_facing",
+                              "attestation_letter"
+                            ]
+                          },
+                          "exportFolderId": {
+                            "type": "string"
+                          },
+                          "scopeApplicationId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "scopeApplicationIds": {
+                            "anyOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastVersionAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title",
+                          "status",
+                          "reportType",
+                          "exportFolderId",
+                          "scopeApplicationId",
+                          "createdAt",
+                          "lastVersionAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "exportId",
+                    "workflowId",
+                    "runId",
+                    "status",
+                    "startedAt",
+                    "closedAt",
+                    "failure",
+                    "reports"
                   ],
                   "additionalProperties": false
                 }
