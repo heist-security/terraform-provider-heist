@@ -1,0 +1,4 @@
+# Collapse generated files in GitHub diffs and leave them out of language stats.
+api/openapi.json linguist-generated=true
+api/openapi.lock.json linguist-generated=true
+docs/** linguist-generated=true
