@@ -159,9 +159,13 @@ func (p *heistProvider) Resources(context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		newApplicationResource,
 		newScopeRuleResource,
+		newCredentialResource,
 	}
 }
 
 func (p *heistProvider) DataSources(context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		newCredentialDataSource,
+		newCredentialsDataSource,
+	}
 }

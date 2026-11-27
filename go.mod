@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
 	github.com/hashicorp/terraform-plugin-go v0.31.0
 	github.com/hashicorp/terraform-plugin-testing v1.16.0
-	github.com/heist-security/heist-go v0.2.0
+	github.com/heist-security/heist-go v0.3.0
 )
 
 require (

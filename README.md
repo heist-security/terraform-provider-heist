@@ -8,8 +8,12 @@ Go SDK in [heist-go](https://github.com/heist-security/heist-go).
 | --- | --- | --- |
 | Resource | `heist_application` | An application and whether it is in testing scope |
 | Resource | `heist_scope_rule` | A URL `ALLOW`/`BLOCK` scope rule |
+| Resource | `heist_credential` | A test account Heist signs in with |
+| Data source | `heist_credential` | A credential's safe metadata and application links |
+| Data source | `heist_credentials` | Every credential's safe metadata and application links |
 
-Reference documentation for each is in [`docs/`](docs/).
+Reference documentation for each is in [`docs/`](docs/). Credential secrets
+are write-only attributes, which need Terraform 1.11 or later.
 
 ## Using the provider
 
