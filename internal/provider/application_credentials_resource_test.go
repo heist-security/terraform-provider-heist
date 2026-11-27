@@ -296,6 +296,40 @@ func TestApplicationCredentialsResource_acceptNewMainTenant(t *testing.T) {
 	})
 }
 
+// TestApplicationCredentialsResource_acceptNewMainTenantUnchanged accepts the
+// new main tenant with a first block that already matches it, so nothing
+// needs linking. A later change to the first block must still apply.
+func TestApplicationCredentialsResource_acceptNewMainTenantUnchanged(t *testing.T) {
+	api := newFakeAPI(t)
+	ids := map[string]string{}
+	replaced := map[string]string{"a": "https://app.example.com/new"}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: appCredentialsConfig(api, false, nil, []string{"a"}, []string{"c"}),
+				Check:  resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "a", "c")),
+			},
+			{
+				Config:      appCredentialsConfig(api, false, replaced, []string{"a"}, []string{"c"}),
+				ExpectError: regexp.MustCompile(`Primary credential in the wrong tenant`),
+			},
+			{
+				// Accepting c's tenant makes no link, unlink or reorder calls.
+				PreConfig: api.resetLinkCalls,
+				Config:    appCredentialsConfig(api, false, replaced, []string{"c"}),
+				Check:     resource.ComposeAggregateTestCheckFunc(api.checkLanes(ids, "c"), api.checkLinkCalls(0)),
+			},
+			{
+				// c's tenant is now the main tenant, so a first block that
+				// shares nothing with it is an ordinary change.
+				Config: appCredentialsConfig(api, false, replaced, []string{"d"}),
+				Check:  resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "d")),
+			},
+		},
+	})
+}
+
 func TestApplicationCredentialsResource_applicationDeleted(t *testing.T) {
 	api := newFakeAPI(t)
 	config := appCredentialsConfig(api, false, nil, []string{"a"})

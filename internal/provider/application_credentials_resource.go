@@ -202,7 +202,10 @@ func (r *applicationCredentialsResource) ModifyPlan(ctx context.Context, req res
 	sortLanes(lanes)
 	for i, l := range matchLanes(lanes, planned) {
 		entityID := types.StringUnknown()
-		if l >= 0 {
+		// If block 1 has accepted a new main lane, leave its entity_id
+		// unknown, so that an update runs and records the lane even when
+		// nothing else changes.
+		if l >= 0 && !(l == 0 && mainLaneMoved(mainEntity, lanes[0].entityID)) {
 			entityID = types.StringValue(lanes[l].entityID)
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("tenant").AtListIndex(i).AtName("entity_id"), entityID)...)
@@ -232,14 +235,18 @@ func (r *applicationCredentialsResource) Update(ctx context.Context, req resourc
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	mainEntity, diags := storedMainEntity(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	// The API keeps no order between tenants, so reordering the blocks after
-	// the first needs no API calls.
-	if sameTenantsIgnoringOrder(planned, prior) {
+	// the first needs no API calls. A new main lane still goes through apply,
+	// which records it.
+	if sameTenantsIgnoringOrder(planned, prior) && !mainLaneMoved(mainEntity, prior[0].entityID) {
 		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 		return
 	}
-	mainEntity, diags := storedMainEntity(ctx, req.Private)
-	resp.Diagnostics.Append(diags...)
 	// Keep the prior state if apply fails before changing anything.
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 	if resp.Diagnostics.HasError() {
@@ -662,7 +669,14 @@ func storedMainEntity(ctx context.Context, private privateGetter) (string, diag.
 // credential with the primary's lane, the configuration has accepted that
 // lane as the main lane, and apply records it.
 func primaryMisplaced(primary lane, mainEntity string, blocks []tenant) bool {
-	return mainEntity != "" && primary.entityID != mainEntity && (len(blocks) == 0 || shared(primary, blocks[0]) == 0)
+	return mainLaneMoved(mainEntity, primary.entityID) && (len(blocks) == 0 || shared(primary, blocks[0]) == 0)
+}
+
+// mainLaneMoved reports whether the lane holding the primary, primaryEntity,
+// is not the main lane recorded after the last apply. Unless
+// primaryMisplaced, block 1 has accepted it, and the next apply records it.
+func mainLaneMoved(mainEntity, primaryEntity string) bool {
+	return mainEntity != "" && primaryEntity != mainEntity
 }
 
 // misplacedPrimaryDetail explains a primary credential that has moved out of
