@@ -125,4 +125,5 @@ Import is supported using the following syntax:
 terraform import heist_application_credentials.app 8b1f4c2e-5a3d-4e6f-9c7b-2d1e0f3a4b5c
 ```
 
-Import reads the application's direct links: the tenant holding the primary first, then the other tenants.
+Import reads the application's direct links: the tenant holding the primary first, then the other tenants. The
+tenant holding the primary becomes the main tenant, so apply fails if the primary later leaves it.

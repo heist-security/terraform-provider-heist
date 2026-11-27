@@ -284,6 +284,15 @@ func (r *applicationCredentialsResource) Read(ctx context.Context, req resource.
 	state.Tenants, diags = tenantsValue(ctx, tenantsFromLanes(lanes, prior))
 	resp.Diagnostics.Append(diags...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+
+	// After import, record the lane holding the primary as the main lane, as
+	// apply does. Never replace a recorded lane: that would accept a primary
+	// that left it outside Terraform.
+	mainEntity, diags := storedMainEntity(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	if mainEntity == "" && len(lanes) > 0 && lanes[0].holdsPrimary() {
+		resp.Diagnostics.Append(setMainEntity(ctx, resp.Private, lanes[0].entityID)...)
+	}
 }
 
 // Delete unlinks every credential from the application, keeping the
@@ -322,8 +331,8 @@ func (r *applicationCredentialsResource) ImportState(ctx context.Context, req re
 // Linking an already-linked credential doesn't move it, so moving one
 // unlinks it first.
 //
-// mainEntity is the lane block 1 managed after the last apply, or "" on
-// create. If the primary is now in another lane that block 1 shares no
+// mainEntity is the lane block 1 managed after the last apply or import, or
+// "" on create. If the primary is now in another lane that block 1 shares no
 // credentials with, apply fails rather than moving the primary by unlinking
 // another tenant's credentials.
 func (r *applicationCredentialsResource) apply(ctx context.Context, plan applicationCredentialsModel, mainEntity string,
@@ -354,8 +363,7 @@ func (r *applicationCredentialsResource) apply(ctx context.Context, plan applica
 		diags.Append(d...)
 		diags.Append(state.Set(ctx, plan)...)
 		if !misplaced && len(after) > 0 && after[0].holdsPrimary() {
-			value, _ := json.Marshal(after[0].entityID)
-			diags.Append(private.SetKey(ctx, mainEntityKey, value)...)
+			diags.Append(setMainEntity(ctx, private, after[0].entityID)...)
 		}
 	}()
 
@@ -652,7 +660,7 @@ type privateSetter interface {
 }
 
 // storedMainEntity returns the entity ID stored under mainEntityKey, or ""
-// before the first apply and after import.
+// before the first apply or import.
 func storedMainEntity(ctx context.Context, private privateGetter) (string, diag.Diagnostics) {
 	value, diags := private.GetKey(ctx, mainEntityKey)
 	var entity string
@@ -662,6 +670,11 @@ func storedMainEntity(ctx context.Context, private privateGetter) (string, diag.
 		}
 	}
 	return entity, diags
+}
+
+func setMainEntity(ctx context.Context, private privateSetter, entityID string) diag.Diagnostics {
+	value, _ := json.Marshal(entityID)
+	return private.SetKey(ctx, mainEntityKey, value)
 }
 
 // primaryMisplaced reports whether the primary, in lane primary, has left the

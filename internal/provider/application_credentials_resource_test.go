@@ -268,6 +268,54 @@ func TestApplicationCredentialsResource_primaryInWrongTenant(t *testing.T) {
 	})
 }
 
+// TestApplicationCredentialsResource_importedPrimaryInWrongTenant imports
+// the resource, then moves the primary out of the main tenant. Import records
+// the main tenant, so apply fails instead of making c's tenant the main one.
+func TestApplicationCredentialsResource_importedPrimaryInWrongTenant(t *testing.T) {
+	api := newFakeAPI(t)
+	ids := map[string]string{}
+	config := func(urls map[string]string) string {
+		return appCredentialsConfig(api, false, urls, []string{"a"}, []string{"c"})
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: config(nil),
+				Check:  resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "a", "c")),
+			},
+			{
+				// Forget the resource without unlinking, then import it.
+				Config: appCredentialsConfig(api, false, nil) + `
+removed {
+  from = heist_application_credentials.test
+  lifecycle {
+    destroy = false
+  }
+}
+`,
+				Check: api.checkLanes(ids, "a", "c"),
+			},
+			{
+				Config:             config(nil),
+				ResourceName:       appCredentialsName,
+				ImportState:        true,
+				ImportStatePersist: true,
+				ImportStateIdFunc:  func(*terraform.State) (string, error) { return ids["app"], nil },
+			},
+			{
+				// The imported state matches, so no apply runs.
+				Config:           config(nil),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
+			},
+			{
+				Config:      config(map[string]string{"a": "https://app.example.com/new"}),
+				ExpectError: regexp.MustCompile(`Primary credential in the wrong tenant`),
+			},
+		},
+	})
+}
+
 // TestApplicationCredentialsResource_acceptNewMainTenant recovers from a
 // primary in the wrong tenant by making that tenant the first block instead
 // of replacing the resource.
