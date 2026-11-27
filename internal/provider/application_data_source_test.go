@@ -163,8 +163,11 @@ data "heist_applications" "none" {
 				resource.TestCheckResourceAttr("data.heist_applications.excluded", "applications.#", "1"),
 				resource.TestCheckResourceAttr("data.heist_applications.excluded", "applications.0.id", excluded.Id),
 				resource.TestCheckResourceAttr("data.heist_applications.roots", "applications.#", "2"),
-				resource.TestCheckResourceAttr("data.heist_applications.roots", "applications.0.id", root.Id),
-				resource.TestCheckResourceAttr("data.heist_applications.roots", "applications.1.id", review.Id),
+				resource.TestCheckTypeSetElemNestedAttrs("data.heist_applications.roots", "applications.*", map[string]string{"id": root.Id}),
+				resource.TestCheckTypeSetElemNestedAttrs("data.heist_applications.roots", "applications.*", map[string]string{"id": review.Id}),
+				checkApplicationIDsSorted("data.heist_applications.all"),
+				checkApplicationIDsSorted("data.heist_applications.children"),
+				checkApplicationIDsSorted("data.heist_applications.roots"),
 				resource.TestCheckResourceAttr("data.heist_applications.review", "applications.#", "1"),
 				resource.TestCheckResourceAttr("data.heist_applications.review", "applications.0.url", review.Url),
 				resource.TestCheckResourceAttr("data.heist_applications.review", "applications.0.requires_review", "true"),
@@ -224,23 +227,23 @@ data "heist_applications" "all" {}
 `,
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr("data.heist_application.boundary", "id", boundary.Id),
-				checkUniqueApplicationIDs("data.heist_applications.all"),
+				checkApplicationIDsSorted("data.heist_applications.all"),
 			),
 		}},
 	})
 }
 
-func checkUniqueApplicationIDs(name string) resource.TestCheckFunc {
+// checkApplicationIDsSorted checks that a heist_applications data source lists
+// applications in ascending ID order, which also means each appears once.
+func checkApplicationIDsSorted(name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		attrs := s.RootModule().Resources[name].Primary.Attributes
 		n, _ := strconv.Atoi(attrs["applications.#"])
-		seen := map[string]bool{}
-		for i := range n {
-			id := attrs[fmt.Sprintf("applications.%d.id", i)]
-			if seen[id] {
-				return fmt.Errorf("%s lists application %s more than once", name, id)
+		for i := 1; i < n; i++ {
+			prev, id := attrs[fmt.Sprintf("applications.%d.id", i-1)], attrs[fmt.Sprintf("applications.%d.id", i)]
+			if prev >= id {
+				return fmt.Errorf("%s lists application %s after %s, not in ascending ID order", name, id, prev)
 			}
-			seen[id] = true
 		}
 		return nil
 	}

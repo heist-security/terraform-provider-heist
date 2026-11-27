@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -51,7 +53,7 @@ func (d *applicationsDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 				Optional:    true,
 			},
 			"parent_application_id": schema.StringAttribute{
-				Description: "Only applications discovered under the application with this ID.",
+				Description: "Only applications discovered under the application with this ID, not including that application.",
 				Optional:    true,
 			},
 			"search": schema.StringAttribute{
@@ -59,7 +61,7 @@ func (d *applicationsDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 				Optional:    true,
 			},
 			"applications": schema.ListNestedAttribute{
-				Description:  "Matching applications.",
+				Description:  "Matching applications, sorted by ID.",
 				Computed:     true,
 				NestedObject: schema.NestedAttributeObject{Attributes: applicationAttributes()},
 			},
@@ -98,8 +100,16 @@ func (d *applicationsDataSource) Read(ctx context.Context, req datasource.ReadRe
 			resp.Diagnostics.AddError("Unable to list applications", err.Error())
 			return
 		}
+		// The API's parent filter also matches the parent itself.
+		if app.Id == state.ParentApplicationID.ValueString() {
+			continue
+		}
 		state.Applications = append(state.Applications, applicationData(app))
 	}
+	// The contract defines no list order, so sort for a stable plan.
+	slices.SortFunc(state.Applications, func(a, b applicationDataModel) int {
+		return strings.Compare(a.ID.ValueString(), b.ID.ValueString())
+	})
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 

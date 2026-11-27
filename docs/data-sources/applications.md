@@ -34,14 +34,14 @@ output "needs_review" {
 ### Optional
 
 - `in_scope` (Boolean) Only applications that are (`true`) or are not (`false`) in testing scope.
-- `parent_application_id` (String) Only applications discovered under the application with this ID.
+- `parent_application_id` (String) Only applications discovered under the application with this ID, not including that application.
 - `requires_review` (Boolean) Only applications that do (`true`) or do not (`false`) need review.
 - `root_only` (Boolean) Only applications without a parent application when `true`.
 - `search` (String) Only applications matching this text, as the Heist API's application search defines it.
 
 ### Read-Only
 
-- `applications` (Attributes List) Matching applications. (see [below for nested schema](#nestedatt--applications))
+- `applications` (Attributes List) Matching applications, sorted by ID. (see [below for nested schema](#nestedatt--applications))
 
 <a id="nestedatt--applications"></a>
 ### Nested Schema for `applications`

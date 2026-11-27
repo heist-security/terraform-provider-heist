@@ -170,9 +170,11 @@ func (f *fakeAPI) getApplication(w http.ResponseWriter, r *http.Request) {
 }
 
 // listApplications filters applications like the API and returns one page,
-// ordered by URL.
+// ordered by URL. Like the API, parentApplicationId also matches the parent
+// itself.
 func (f *fakeAPI) listApplications(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	parent := q.Get("parentApplicationId")
 	page, size := 1, 25
 	if v := q.Get("page"); v != "" {
 		page, _ = strconv.Atoi(v)
@@ -196,7 +198,7 @@ func (f *fakeAPI) listApplications(w http.ResponseWriter, r *http.Request) {
 		if v := q.Get("inScope"); v != "" && v != strconv.FormatBool(app.InScope) ||
 			q.Get("rootOnly") == "true" && len(app.ParentApplicationIds) > 0 ||
 			q.Get("requiresReview") != "" && q.Get("requiresReview") != strconv.FormatBool(app.RequiresReview) ||
-			q.Get("parentApplicationId") != "" && !slices.Contains(app.ParentApplicationIds, q.Get("parentApplicationId")) ||
+			parent != "" && app.Id != parent && !slices.Contains(app.ParentApplicationIds, parent) ||
 			!strings.Contains(strings.ToLower(app.Url), strings.ToLower(q.Get("search"))) {
 			continue
 		}
