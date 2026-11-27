@@ -4,11 +4,13 @@ The Terraform provider for [Heist](https://heist.security). It manages
 workspace configuration through the Heist external REST API, using the public
 Go SDK in [heist-go](https://github.com/heist-security/heist-go).
 
-| Type | Name | Manages |
+| Type | Name | Purpose |
 | --- | --- | --- |
 | Resource | `heist_application` | An application and whether it is in testing scope |
 | Resource | `heist_scope_rule` | A URL `ALLOW`/`BLOCK` scope rule |
 | Resource | `heist_credential` | A test account Heist signs in with |
+| Data source | `heist_application` | Looks up one application by ID or URL |
+| Data source | `heist_applications` | Lists applications matching filters |
 | Data source | `heist_credential` | A credential's safe metadata and application links |
 | Data source | `heist_credentials` | Every credential's safe metadata and application links |
 
