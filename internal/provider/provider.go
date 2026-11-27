@@ -160,6 +160,7 @@ func (p *heistProvider) Resources(context.Context) []func() resource.Resource {
 		newApplicationResource,
 		newScopeRuleResource,
 		newCredentialResource,
+		newApplicationCredentialsResource,
 	}
 }
 

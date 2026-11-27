@@ -9,6 +9,7 @@ Go SDK in [heist-go](https://github.com/heist-security/heist-go).
 | Resource | `heist_application` | An application and whether it is in testing scope |
 | Resource | `heist_scope_rule` | A URL `ALLOW`/`BLOCK` scope rule |
 | Resource | `heist_credential` | A test account Heist signs in with |
+| Resource | `heist_application_credentials` | The credentials an application uses, by tenant and privilege |
 | Data source | `heist_application` | Looks up one application by ID or URL |
 | Data source | `heist_applications` | Lists applications matching filters |
 | Data source | `heist_credential` | A credential's safe metadata and application links |

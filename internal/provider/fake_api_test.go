@@ -3,6 +3,8 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -39,6 +41,8 @@ type fakeAPI struct {
 	customCalls   int
 	// scopeCalls counts scope updates, which start Heist workflows.
 	scopeCalls int
+	// linkCalls counts credential link, unlink and reorder requests.
+	linkCalls int
 	// failScope makes scope updates return a server error.
 	failScope bool
 	// issued holds unused access tokens from the token endpoint. Each is
@@ -67,6 +71,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	mux.HandleFunc("GET /applications", f.listApplications)
 	mux.HandleFunc("GET /applications/{id}", f.getApplication)
 	mux.HandleFunc("POST /applications/{id}/scope", f.updateApplicationScope)
+	mux.HandleFunc("POST /applications/{id}/credential-order", f.reorderCredentials)
 	mux.HandleFunc("POST /scope/rules", f.createScopeRule)
 	mux.HandleFunc("GET /scope/rules/{id}", f.getScopeRule)
 	mux.HandleFunc("DELETE /scope/rules/{id}", f.deleteScopeRule)
@@ -77,6 +82,8 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	mux.HandleFunc("DELETE /credentials/{id}", f.deleteCredential)
 	mux.HandleFunc("POST /credentials/{id}/custom", f.updateCustomCredential)
 	mux.HandleFunc("POST /credentials/{id}/password", f.setCredentialPassword)
+	mux.HandleFunc("POST /credentials/{id}/link", f.linkCredential)
+	mux.HandleFunc("POST /credentials/{id}/unlink", f.unlinkCredential)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -298,13 +305,7 @@ func (f *fakeAPI) createCredential(w http.ResponseWriter, r *http.Request) {
 			Type:         heist.CredentialType(body.Type),
 			LoginUrl:     body.LoginUrl,
 			Instructions: body.Instructions,
-			Applications: []struct {
-				EntityId  *string  `json:"entityId"`
-				Id        string   `json:"id"`
-				IsPrimary bool     `json:"isPrimary"`
-				RoleLevel *float32 `json:"roleLevel"`
-				Url       string   `json:"url"`
-			}{},
+			Applications: []credentialLink{},
 		},
 		secrets: map[string]string{},
 	}
@@ -385,12 +386,20 @@ func (f *fakeAPI) getCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c.Credential)
 }
 
+// deleteCredential unlinks the credential from every application, choosing
+// successor primaries like unlinkCredential, then deletes it.
 func (f *fakeAPI) deleteCredential(w http.ResponseWriter, r *http.Request) {
-	if _, ok := f.creds[r.PathValue("id")]; !ok {
+	c, ok := f.creds[r.PathValue("id")]
+	if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	delete(f.creds, r.PathValue("id"))
+	delete(f.creds, c.Id)
+	for _, l := range c.Applications {
+		if l.IsPrimary {
+			f.promoteSuccessor(l.Id, *l.EntityId)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -466,4 +475,202 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": http.StatusText(status)}})
+}
+
+// credentialLink is a credential's direct link to an application.
+type credentialLink = struct {
+	EntityId  *string  `json:"entityId"`
+	Id        string   `json:"id"`
+	IsPrimary bool     `json:"isPrimary"`
+	RoleLevel *float32 `json:"roleLevel"`
+	Url       string   `json:"url"`
+}
+
+// appLinks returns every direct link to the application, sorted by
+// credential ID so that choices between equal links are deterministic.
+func (f *fakeAPI) appLinks(appID string) []*credentialLink {
+	ids := slices.Sorted(maps.Keys(f.creds))
+	var links []*credentialLink
+	for _, id := range ids {
+		c := f.creds[id]
+		for i := range c.Applications {
+			if c.Applications[i].Id == appID {
+				links = append(links, &c.Applications[i])
+			}
+		}
+	}
+	return links
+}
+
+// level is a link's privilege level, with null as the lowest.
+func level(l *credentialLink) float32 {
+	if l.RoleLevel == nil {
+		return float32(math.Inf(-1))
+	}
+	return *l.RoleLevel
+}
+
+// linkCredential follows the service's lane rules: entityId joins that lane,
+// isCrossWorkspace starts a new one, and neither joins the main lane, or
+// starts it as primary when the application has no links. The link goes to
+// the bottom of its lane. Linking an already-linked credential returns it
+// unchanged.
+func (f *fakeAPI) linkCredential(w http.ResponseWriter, r *http.Request) {
+	c, ok := f.creds[r.PathValue("id")]
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	var body heist.LinkCredentialJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	appID := body.ApplicationId.String()
+	app, ok := f.apps[appID]
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	f.linkCalls++
+	if slices.ContainsFunc(c.Applications, func(l credentialLink) bool { return l.Id == appID }) {
+		writeJSON(w, http.StatusOK, c.Credential)
+		return
+	}
+	links := f.appLinks(appID)
+	entity := uuid.NewString()
+	switch {
+	case body.EntityId != nil:
+		entity = body.EntityId.String()
+		if !slices.ContainsFunc(links, func(l *credentialLink) bool { return *l.EntityId == entity }) {
+			writeError(w, http.StatusBadRequest, "unknown_entity")
+			return
+		}
+	case body.IsCrossWorkspace != nil && *body.IsCrossWorkspace:
+	default:
+		for _, l := range links {
+			if l.IsPrimary {
+				entity = *l.EntityId
+			}
+		}
+	}
+	var bottom float32
+	for i, l := range slices.DeleteFunc(slices.Clone(links), func(l *credentialLink) bool { return *l.EntityId != entity || l.RoleLevel == nil }) {
+		if i == 0 || *l.RoleLevel-1 < bottom {
+			bottom = *l.RoleLevel - 1
+		}
+	}
+	c.Applications = append(c.Applications, credentialLink{
+		EntityId: &entity, Id: appID, IsPrimary: len(links) == 0, RoleLevel: &bottom, Url: app.Url,
+	})
+	writeJSON(w, http.StatusOK, c.Credential)
+}
+
+// unlinkCredential removes a link, keeping the credential. A removed primary
+// is succeeded from the same lane if possible, otherwise from another lane.
+func (f *fakeAPI) unlinkCredential(w http.ResponseWriter, r *http.Request) {
+	c, ok := f.creds[r.PathValue("id")]
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	var body heist.UnlinkCredentialJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	appID := body.ApplicationId.String()
+	f.linkCalls++
+	i := slices.IndexFunc(c.Applications, func(l credentialLink) bool { return l.Id == appID })
+	if i < 0 {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	removed := c.Applications[i]
+	c.Applications = slices.Delete(c.Applications, i, i+1)
+	if removed.IsPrimary {
+		f.promoteSuccessor(appID, *removed.EntityId)
+	}
+	writeJSON(w, http.StatusOK, c.Credential)
+}
+
+// promoteSuccessor makes the most privileged link in the lane the primary,
+// or the most privileged link in another lane when the lane is empty.
+func (f *fakeAPI) promoteSuccessor(appID, entity string) {
+	var best *credentialLink
+	for _, sameLane := range []bool{true, false} {
+		for _, l := range f.appLinks(appID) {
+			if (*l.EntityId == entity) == sameLane && (best == nil || level(l) > level(best)) {
+				best = l
+			}
+		}
+		if best != nil {
+			best.IsPrimary = true
+			return
+		}
+	}
+}
+
+// reorderCredentials orders one complete lane, most privileged first. In the
+// main lane, the first credential becomes the primary.
+func (f *fakeAPI) reorderCredentials(w http.ResponseWriter, r *http.Request) {
+	appID := r.PathValue("id")
+	if _, ok := f.apps[appID]; !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	var body heist.ReorderApplicationCredentialsJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.OrderedCredentialIds) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid")
+		return
+	}
+	f.linkCalls++
+	byCredential := map[string]*credentialLink{}
+	for _, id := range slices.Sorted(maps.Keys(f.creds)) {
+		for i := range f.creds[id].Applications {
+			if l := &f.creds[id].Applications[i]; l.Id == appID {
+				byCredential[id] = l
+			}
+		}
+	}
+	first, ok := byCredential[body.OrderedCredentialIds[0].String()]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "not_linked")
+		return
+	}
+	entity := *first.EntityId
+	lane := 0
+	for _, l := range byCredential {
+		if *l.EntityId == entity {
+			lane++
+		}
+	}
+	seen := map[string]bool{}
+	for _, id := range body.OrderedCredentialIds {
+		l, ok := byCredential[id.String()]
+		if !ok || *l.EntityId != entity || seen[id.String()] {
+			writeError(w, http.StatusBadRequest, "not_one_complete_lane")
+			return
+		}
+		seen[id.String()] = true
+	}
+	if len(seen) != lane {
+		writeError(w, http.StatusBadRequest, "not_one_complete_lane")
+		return
+	}
+	main := false
+	for id := range seen {
+		main = main || byCredential[id].IsPrimary
+	}
+	result := []heist.Credential{}
+	for i, id := range body.OrderedCredentialIds {
+		l := byCredential[id.String()]
+		lvl := float32(len(body.OrderedCredentialIds) - i)
+		l.RoleLevel = &lvl
+		if main {
+			l.IsPrimary = i == 0
+		}
+		result = append(result, f.creds[id.String()].Credential)
+	}
+	writeJSON(w, http.StatusOK, result)
 }
