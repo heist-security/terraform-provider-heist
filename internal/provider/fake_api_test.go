@@ -309,7 +309,18 @@ func (c *fakeCredential) setPassword(password string) {
 
 func (f *fakeAPI) credentialOptions(w http.ResponseWriter, _ *http.Request) {
 	f.optionsCalls++
-	email := fmt.Sprintf("tester-%d@tester.heisthq.com", f.optionsCalls)
+	// Like the API, return the first email no credential uses yet. It is
+	// reserved only when a credential is saved with it.
+	used := map[string]bool{}
+	for _, c := range f.creds {
+		if c.Hint.Email != nil {
+			used[*c.Hint.Email] = true
+		}
+	}
+	var email string
+	for n := 1; email == "" || used[email]; n++ {
+		email = fmt.Sprintf("tester-%d@tester.heisthq.com", n)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"email": email, "phoneNumbers": []string{"+15550000001"}})
 }
 

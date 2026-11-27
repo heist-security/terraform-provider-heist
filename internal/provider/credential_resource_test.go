@@ -267,6 +267,36 @@ removed {
 	})
 }
 
+// Terraform creates resources concurrently, and the API reserves a generated
+// email only when a credential is saved with it.
+func TestCredentialResource_generatedEmailsInOneApply(t *testing.T) {
+	api := newFakeAPI(t)
+	var config strings.Builder
+	config.WriteString(api.providerConfig())
+	const count = 8
+	for i := range count {
+		fmt.Fprintf(&config, "resource \"heist_credential\" \"email%d\" {\n  type = \"EMAIL\"\n  email {}\n}\n", i)
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProviderFactories(),
+		Steps: []resource.TestStep{{
+			Config: config.String(),
+			Check: func(s *terraform.State) error {
+				seen := map[string]string{}
+				for i := range count {
+					name := fmt.Sprintf("heist_credential.email%d", i)
+					email := s.RootModule().Resources[name].Primary.Attributes["email.email"]
+					if other, ok := seen[email]; ok {
+						return fmt.Errorf("%s and %s both have email %q", other, name, email)
+					}
+					seen[email] = name
+				}
+				return nil
+			},
+		}},
+	})
+}
+
 func TestCredentialResource_generatedPhoneAndNoPayload(t *testing.T) {
 	api := newFakeAPI(t)
 	config := api.providerConfig() + `

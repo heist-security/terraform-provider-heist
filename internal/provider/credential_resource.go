@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -33,6 +34,13 @@ var (
 // apply. Values the API never returns are null after import; that apply
 // adopts their configured values instead of replacing the credential.
 const importedKey = "imported"
+
+// createMu serializes credential creates, from requesting a generated email
+// or phone to saving the credential. Heist reserves a generated email only
+// when a credential is saved with it, so concurrent creates could be offered
+// the same one. Resource instances aren't shared between requests, so the
+// lock is package-level.
+var createMu sync.Mutex
 
 // credentialBlocks maps each credential type to the block holding its sign-in
 // payload. GOOGLE has no payload and the anon block is optional.
@@ -444,6 +452,8 @@ func (r *credentialResource) Create(ctx context.Context, req resource.CreateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	createMu.Lock()
+	defer createMu.Unlock()
 	body, diags := r.createBody(ctx, plan, config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
