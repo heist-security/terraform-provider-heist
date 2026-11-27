@@ -268,6 +268,34 @@ func TestApplicationCredentialsResource_primaryInWrongTenant(t *testing.T) {
 	})
 }
 
+// TestApplicationCredentialsResource_acceptNewMainTenant recovers from a
+// primary in the wrong tenant by making that tenant the first block instead
+// of replacing the resource.
+func TestApplicationCredentialsResource_acceptNewMainTenant(t *testing.T) {
+	api := newFakeAPI(t)
+	ids := map[string]string{}
+	replaced := map[string]string{"a": "https://app.example.com/new"}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: appCredentialsConfig(api, false, nil, []string{"a"}, []string{"c"}),
+				Check:  resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "a", "c")),
+			},
+			{
+				Config:      appCredentialsConfig(api, false, replaced, []string{"a"}, []string{"c"}),
+				ExpectError: regexp.MustCompile(`Primary credential in the wrong tenant`),
+			},
+			{
+				// c's tenant is now the main tenant, and the first block
+				// shares c with it, so apply proceeds.
+				Config: appCredentialsConfig(api, false, replaced, []string{"c", "d"}),
+				Check:  resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "c,d")),
+			},
+		},
+	})
+}
+
 func TestApplicationCredentialsResource_applicationDeleted(t *testing.T) {
 	api := newFakeAPI(t)
 	config := appCredentialsConfig(api, false, nil, []string{"a"})

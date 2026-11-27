@@ -187,17 +187,17 @@ func (r *applicationCredentialsResource) ModifyPlan(ctx context.Context, req res
 		return
 	}
 	// Read puts the lane holding the primary first.
-	if len(prior) > 0 && mainEntity != "" && prior[0].entityID != mainEntity {
-		resp.Diagnostics.AddWarning("Primary credential in the wrong tenant", misplacedPrimaryDetail(plan.ApplicationID.ValueString())+
-			"\n\nApplying this plan without replacing the resource will fail.")
-		return
-	}
 	lanes := make([]lane, len(prior))
 	for i, t := range prior {
 		lanes[i].entityID = t.entityID
 		for _, id := range t.credentials {
 			lanes[i].members = append(lanes[i].members, laneMember{credentialID: id, primary: i == 0 && len(lanes[i].members) == 0})
 		}
+	}
+	if len(lanes) > 0 && primaryMisplaced(lanes[0], mainEntity, planned) {
+		resp.Diagnostics.AddWarning("Primary credential in the wrong tenant", misplacedPrimaryDetail(plan.ApplicationID.ValueString())+
+			"\n\nApplying this plan without replacing the resource will fail.")
+		return
 	}
 	sortLanes(lanes)
 	for i, l := range matchLanes(lanes, planned) {
@@ -316,8 +316,9 @@ func (r *applicationCredentialsResource) ImportState(ctx context.Context, req re
 // unlinks it first.
 //
 // mainEntity is the lane block 1 managed after the last apply, or "" on
-// create. If the primary is now in another lane, apply fails rather than
-// moving the primary by unlinking another tenant's credentials.
+// create. If the primary is now in another lane that block 1 shares no
+// credentials with, apply fails rather than moving the primary by unlinking
+// another tenant's credentials.
 func (r *applicationCredentialsResource) apply(ctx context.Context, plan applicationCredentialsModel, mainEntity string,
 	state *tfsdk.State, private privateSetter, diags *diag.Diagnostics) {
 	appID, ok := parseID(plan.ApplicationID.ValueString(), diags)
@@ -335,7 +336,7 @@ func (r *applicationCredentialsResource) apply(ctx context.Context, plan applica
 		return
 	}
 
-	misplaced := len(lanes) > 0 && lanes[0].holdsPrimary() && mainEntity != "" && lanes[0].entityID != mainEntity
+	misplaced := len(lanes) > 0 && lanes[0].holdsPrimary() && primaryMisplaced(lanes[0], mainEntity, planned)
 	defer func() {
 		after, d := r.lanes(ctx, appID, planned)
 		if d.HasError() {
@@ -654,6 +655,14 @@ func storedMainEntity(ctx context.Context, private privateGetter) (string, diag.
 		}
 	}
 	return entity, diags
+}
+
+// primaryMisplaced reports whether the primary, in lane primary, has left the
+// lane block 1 managed after the last apply, mainEntity. If block 1 shares a
+// credential with the primary's lane, the configuration has accepted that
+// lane as the main lane, and apply records it.
+func primaryMisplaced(primary lane, mainEntity string, blocks []tenant) bool {
+	return mainEntity != "" && primary.entityID != mainEntity && (len(blocks) == 0 || shared(primary, blocks[0]) == 0)
 }
 
 // misplacedPrimaryDetail explains a primary credential that has moved out of
