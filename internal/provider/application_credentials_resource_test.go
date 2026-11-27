@@ -228,31 +228,41 @@ func TestApplicationCredentialsResource_createBeforeDestroy(t *testing.T) {
 func TestApplicationCredentialsResource_primaryInWrongTenant(t *testing.T) {
 	api := newFakeAPI(t)
 	ids := map[string]string{}
-	replaced := appCredentialsConfig(api, false, map[string]string{"a": "https://app.example.com/new"}, []string{"a"}, []string{"c"})
+	// replace_triggered_by forces replacement the same way as
+	// terraform apply -replace; changing trigger replaces the resource.
+	config := func(trigger int, urls map[string]string) string {
+		return strings.Replace(appCredentialsConfig(api, false, urls, []string{"a"}, []string{"c"}),
+			"  application_id = heist_application.app.id\n",
+			"  application_id = heist_application.app.id\n  lifecycle {\n    replace_triggered_by = [terraform_data.trigger]\n  }\n", 1) +
+			fmt.Sprintf("\nresource \"terraform_data\" \"trigger\" {\n  input = %d\n}\n", trigger)
+	}
+	replaced := map[string]string{"a": "https://app.example.com/new"}
 	wantErr := regexp.MustCompile(`terraform apply\s+-replace=heist_application_credentials.<name>`)
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProviderFactories(),
 		Steps: []resource.TestStep{
 			{
-				Config: appCredentialsConfig(api, false, nil, []string{"a"}, []string{"c"}),
+				Config: config(1, nil),
 				Check:  resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "a", "c")),
 			},
 			{
 				// Detected on apply, after the credential is deleted.
-				Config:      replaced,
+				Config:      config(1, replaced),
 				ExpectError: wantErr,
 			},
 			{
-				// Detected on plan once refresh sees the moved primary.
-				Config:      replaced,
-				PlanOnly:    true,
+				// Detected again on the next apply. Plan only warns, so
+				// that planning a forced replacement still works.
+				Config:      config(1, replaced),
 				ExpectError: wantErr,
 			},
 			{
 				// Replacing the resource recovers.
-				Config: replaced,
-				Taint:  []string{appCredentialsName},
-				Check:  resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "a", "c")),
+				Config: config(2, replaced),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(appCredentialsName, plancheck.ResourceActionDestroyBeforeCreate),
+				}},
+				Check: resource.ComposeAggregateTestCheckFunc(api.captureIDs(ids), api.checkLanes(ids, "a", "c")),
 			},
 		},
 	})

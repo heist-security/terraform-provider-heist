@@ -159,7 +159,10 @@ func (r *applicationCredentialsResource) ValidateConfig(ctx context.Context, req
 
 // ModifyPlan matches the planned tenant blocks to the lanes in state, so
 // that each block's entity_id follows its lane however the blocks are
-// ordered, and reports a primary credential in the wrong lane before apply.
+// ordered. It warns about a primary credential in the wrong lane, which
+// fails on apply. It can't fail: Terraform plans an update with the prior
+// state before planning a forced replacement, so an error would also block
+// the -replace recovery.
 func (r *applicationCredentialsResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
 		return
@@ -185,7 +188,8 @@ func (r *applicationCredentialsResource) ModifyPlan(ctx context.Context, req res
 	}
 	// Read puts the lane holding the primary first.
 	if len(prior) > 0 && mainEntity != "" && prior[0].entityID != mainEntity {
-		resp.Diagnostics.AddError("Primary credential in the wrong tenant", misplacedPrimaryDetail(plan.ApplicationID.ValueString()))
+		resp.Diagnostics.AddWarning("Primary credential in the wrong tenant", misplacedPrimaryDetail(plan.ApplicationID.ValueString())+
+			"\n\nApplying this plan without replacing the resource will fail.")
 		return
 	}
 	lanes := make([]lane, len(prior))
