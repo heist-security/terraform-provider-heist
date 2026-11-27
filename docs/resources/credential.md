@@ -2,12 +2,12 @@
 page_title: "heist_credential Resource - heist"
 subcategory: ""
 description: |-
-  A test account Heist signs in with. Set type and the block for that type. The credential is created without application links. Only a new basic password (BASIC and HTTP_BASIC) and the email, phone, instructions and secrets of a CUSTOM credential are updated in place. Any other change, including type, replaces the credential, which also removes its application links. Secrets are write-only and need Terraform 1.11 or later.
+  A test account Heist signs in with. Set type and the block for that type. The credential is created without application links. Only a new basic password (BASIC and HTTP_BASIC) and the instructions and secrets of a CUSTOM credential are updated in place. Any other change, including type, replaces the credential, which also removes its application links. Secrets are write-only and need Terraform 1.11 or later.
 ---
 
 # heist_credential (Resource)
 
-A test account Heist signs in with. Set `type` and the block for that type. The credential is created without application links. Only a new `basic` password (BASIC and HTTP_BASIC) and the email, phone, instructions and secrets of a CUSTOM credential are updated in place. Any other change, including `type`, replaces the credential, which also removes its application links. Secrets are write-only and need Terraform 1.11 or later.
+A test account Heist signs in with. Set `type` and the block for that type. The credential is created without application links. Only a new `basic` password (BASIC and HTTP_BASIC) and the instructions and secrets of a CUSTOM credential are updated in place. Any other change, including `type`, replaces the credential, which also removes its application links. Secrets are write-only and need Terraform 1.11 or later.
 
 ## Example Usage
 
@@ -76,7 +76,8 @@ masked API key and secret names, which appear in `hint`.
 
 EMAIL, MICROSOFT and CUSTOM credentials sign in with a Heist email address, and SMS credentials with a Heist phone
 number. If you don't set one, the provider requests an available one from Heist when it creates the credential and
-keeps it in state. Later applies don't request another.
+keeps it in state. Later applies don't request another. Changing the email or phone of a CUSTOM credential replaces
+it, because Heist keeps the contact details of an existing CUSTOM credential.
 
 ## Application links
 
@@ -98,7 +99,7 @@ the credential removes its links.
 - `api_key` (Block, Optional) API key sent in a header, for API_KEY credentials. (see [below for nested schema](#nestedblock--api_key))
 - `bank_id` (Block, Optional) BankID sign-in, for BANK_ID credentials. (see [below for nested schema](#nestedblock--bank_id))
 - `basic` (Block, Optional) Username and password, for BASIC and HTTP_BASIC credentials. (see [below for nested schema](#nestedblock--basic))
-- `custom` (Block, Optional) Custom sign-in described by `instructions`, for CUSTOM credentials. Updated in place. (see [below for nested schema](#nestedblock--custom))
+- `custom` (Block, Optional) Custom sign-in described by `instructions`, for CUSTOM credentials. Secrets are updated in place. (see [below for nested schema](#nestedblock--custom))
 - `custom_header` (Block List) An HTTP header sent with every request. Changing headers replaces the credential. (see [below for nested schema](#nestedblock--custom_header))
 - `custom_headers_wo_version` (Number) Change to send `custom_header` values again, which replaces the credential.
 - `email` (Block, Optional) Email OTP or magic-link sign-in, for EMAIL credentials. (see [below for nested schema](#nestedblock--email))

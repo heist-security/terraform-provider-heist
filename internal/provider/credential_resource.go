@@ -153,7 +153,7 @@ func (r *credentialResource) Metadata(_ context.Context, req resource.MetadataRe
 
 const credentialDescription = "A test account Heist signs in with. Set `type` and the block for that type. " +
 	"The credential is created without application links. Only a new `basic` password (BASIC and HTTP_BASIC) " +
-	"and the email, phone, instructions and secrets of a CUSTOM credential are updated in place. Any other " +
+	"and the instructions and secrets of a CUSTOM credential are updated in place. Any other " +
 	"change, including `type`, replaces the credential, which also removes its application links. Secrets are " +
 	"write-only and need Terraform 1.11 or later."
 
@@ -313,15 +313,15 @@ func (r *credentialResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				},
 			},
 			"custom": schema.SingleNestedBlock{
-				Description: "Custom sign-in described by `instructions`, for CUSTOM credentials. Updated in place.",
+				Description: "Custom sign-in described by `instructions`, for CUSTOM credentials. Secrets are updated in place.",
 				Attributes: map[string]schema.Attribute{
+					// The API keeps the email and phone of an existing CUSTOM
+					// credential, so changing them replaces it.
 					"email": schema.StringAttribute{
-						Description:   "Heist email address. Generated when unset.",
-						Optional:      true,
-						Computed:      true,
-						PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+						Description: "Heist email address. Generated when unset.",
+						Optional:    true, Computed: true, PlanModifiers: generated,
 					},
-					"phone":              schema.StringAttribute{Description: "Heist phone number.", Optional: true},
+					"phone":              schema.StringAttribute{Description: "Heist phone number.", Optional: true, PlanModifiers: replace},
 					"secrets_wo_version": version("Change to send every `secret` value again, in place."),
 				},
 				Blocks: map[string]schema.Block{
@@ -667,7 +667,7 @@ func (r *credentialResource) get(ctx context.Context, id string) (*heist.Credent
 }
 
 // Update sets a new BASIC or HTTP_BASIC password or edits a CUSTOM
-// credential. Every other planned change either replaces the credential or
+// credential's instructions and secrets. Every other planned change either replaces the credential or
 // only records values in state.
 func (r *credentialResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state, config credentialModel
@@ -734,9 +734,10 @@ func (r *credentialResource) Update(ctx context.Context, req resource.UpdateRequ
 	resp.Diagnostics.Append(resp.Private.SetKey(ctx, importedKey, nil)...)
 }
 
-// customUpdate builds a CUSTOM edit. Secrets already stored are sent by name
-// only, which keeps their values, unless the secrets version changed. send is
-// false when nothing the endpoint updates has changed.
+// customUpdate builds a CUSTOM edit of instructions and secrets. Secrets
+// already stored are sent by name only, which keeps their values, unless the
+// secrets version changed. send is false when neither has changed. The API
+// ignores email and phone for an existing CUSTOM credential.
 func customUpdate(ctx context.Context, plan, state, config credentialModel, resendSecrets bool) (body heist.UpdateCustomCredentialJSONRequestBody, send bool, diags diag.Diagnostics) {
 	secrets, d := nameValues(ctx, config.Custom.Secrets)
 	diags.Append(d...)
@@ -747,8 +748,6 @@ func customUpdate(ctx context.Context, plan, state, config credentialModel, rese
 		storedNames[s.Name.ValueString()] = true
 	}
 	body = heist.UpdateCustomCredentialJSONRequestBody{
-		Email:        plan.Custom.Email.ValueStringPointer(),
-		Phone:        plan.Custom.Phone.ValueStringPointer(),
 		Instructions: plan.Instructions.ValueStringPointer(),
 	}
 	body.Secrets = make([]struct {
@@ -762,8 +761,6 @@ func customUpdate(ctx context.Context, plan, state, config credentialModel, rese
 		}
 	}
 	send = resendSecrets ||
-		!plan.Custom.Email.Equal(state.Custom.Email) ||
-		!plan.Custom.Phone.Equal(state.Custom.Phone) ||
 		!plan.Instructions.Equal(state.Instructions) ||
 		!plan.Custom.Secrets.Equal(state.Custom.Secrets)
 	return body, send, diags

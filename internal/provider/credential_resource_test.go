@@ -94,7 +94,7 @@ resource "heist_credential" "test" {
 
 func TestCredentialResource_custom(t *testing.T) {
 	api := newFakeAPI(t)
-	config := func(instructions string, version int, secrets ...string) string {
+	config := func(email, instructions string, version int, secrets ...string) string {
 		var blocks strings.Builder
 		for i := 0; i < len(secrets); i += 2 {
 			fmt.Fprintf(&blocks, "    secret {\n      name     = %q\n      value_wo = %q\n    }\n", secrets[i], secrets[i+1])
@@ -104,10 +104,10 @@ resource "heist_credential" "test" {
   type         = "CUSTOM"
   instructions = %q
   custom {
-    secrets_wo_version = %d
+%s    secrets_wo_version = %d
 %s  }
 }
-`, instructions, version, blocks.String())
+`, instructions, email, version, blocks.String())
 	}
 	var id string
 
@@ -116,7 +116,7 @@ resource "heist_credential" "test" {
 		Steps: []resource.TestStep{
 			{
 				// The email is generated when unset.
-				Config: config("Sign in with the TOTP.", 1, "PASSWORD", "pw", "TOTP", "seed"),
+				Config: config("", "Sign in with the TOTP.", 1, "PASSWORD", "pw", "TOTP", "seed"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(credentialName, "custom.email", "tester-1@tester.heisthq.com"),
 					resource.TestCheckResourceAttr(credentialName, "hint.secret_names.#", "2"),
@@ -130,7 +130,7 @@ resource "heist_credential" "test" {
 			},
 			{
 				// Repeated applies keep the generated email.
-				Config: config("Sign in with the TOTP.", 1, "PASSWORD", "pw", "TOTP", "seed"),
+				Config: config("", "Sign in with the TOTP.", 1, "PASSWORD", "pw", "TOTP", "seed"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
@@ -138,7 +138,7 @@ resource "heist_credential" "test" {
 			},
 			{
 				// Edits keep stored secrets and send new ones.
-				Config: config("Sign in with the PIN.", 1, "PASSWORD", "ignored", "TOTP", "seed", "PIN", "1234"),
+				Config: config("", "Sign in with the PIN.", 1, "PASSWORD", "ignored", "TOTP", "seed", "PIN", "1234"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(credentialName, plancheck.ResourceActionUpdate)},
 				},
@@ -153,7 +153,7 @@ resource "heist_credential" "test" {
 			},
 			{
 				// A new version sends every secret value.
-				Config: config("Sign in with the PIN.", 2, "PASSWORD", "pw2", "TOTP", "seed", "PIN", "1234"),
+				Config: config("", "Sign in with the PIN.", 2, "PASSWORD", "pw2", "TOTP", "seed", "PIN", "1234"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrPtr(credentialName, "id", &id),
 					api.checkCredentialSecret(&id, "PASSWORD", "pw2"),
@@ -165,6 +165,18 @@ resource "heist_credential" "test" {
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"custom.secrets_wo_version"},
+			},
+			{
+				// The API keeps the email of an existing CUSTOM credential,
+				// so changing it replaces the credential.
+				Config: config(`    email = "chosen@tester.heisthq.com"`+"\n", "Sign in with the PIN.", 2, "PASSWORD", "pw2", "TOTP", "seed", "PIN", "1234"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(credentialName, plancheck.ResourceActionDestroyBeforeCreate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(credentialName, "custom.email", "chosen@tester.heisthq.com"),
+					api.checkCredentialCount(1),
+				),
 			},
 		},
 		CheckDestroy: func(*terraform.State) error { return api.checkCredentialCount(0)(nil) },

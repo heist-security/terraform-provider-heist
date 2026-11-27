@@ -359,7 +359,9 @@ func (f *fakeAPI) updateCustomCredential(w http.ResponseWriter, r *http.Request)
 	}
 	c.secrets = secrets
 	c.Hint.SecretNames = &names
-	c.Hint.Email, c.Hint.Phone, c.Instructions = body.Email, body.Phone, body.Instructions
+	// Like the API, keep the email and phone of an existing CUSTOM
+	// credential.
+	c.Instructions = body.Instructions
 	writeJSON(w, http.StatusOK, c.Credential)
 }
 
