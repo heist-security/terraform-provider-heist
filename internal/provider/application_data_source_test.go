@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -133,7 +134,13 @@ func TestApplicationsDataSource(t *testing.T) {
 data "heist_applications" "all" {}
 
 data "heist_applications" "children" {
-  parent_application_id = %q
+  parent_application_id = %[1]q
+  in_scope              = true
+}
+
+# The parent is left out however its ID is written.
+data "heist_applications" "children_uppercase_parent" {
+  parent_application_id = %[2]q
   in_scope              = true
 }
 
@@ -156,10 +163,11 @@ data "heist_applications" "search" {
 data "heist_applications" "none" {
   search = "nothing"
 }
-`, root.Id),
+`, root.Id, strings.ToUpper(root.Id)),
 			Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr("data.heist_applications.all", "applications.#", "108"),
 				resource.TestCheckResourceAttr("data.heist_applications.children", "applications.#", "105"),
+				resource.TestCheckResourceAttr("data.heist_applications.children_uppercase_parent", "applications.#", "105"),
 				resource.TestCheckResourceAttr("data.heist_applications.excluded", "applications.#", "1"),
 				resource.TestCheckResourceAttr("data.heist_applications.excluded", "applications.0.id", excluded.Id),
 				resource.TestCheckResourceAttr("data.heist_applications.roots", "applications.#", "2"),

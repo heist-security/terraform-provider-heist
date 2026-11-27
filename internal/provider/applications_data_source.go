@@ -101,7 +101,7 @@ func (d *applicationsDataSource) Read(ctx context.Context, req datasource.ReadRe
 			return
 		}
 		// The API's parent filter also matches the parent itself.
-		if app.Id == state.ParentApplicationID.ValueString() {
+		if params.ParentApplicationId != nil && app.Id == params.ParentApplicationId.String() {
 			continue
 		}
 		state.Applications = append(state.Applications, applicationData(app))
