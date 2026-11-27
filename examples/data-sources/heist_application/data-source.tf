@@ -1,11 +1,14 @@
-# Look up an application Heist discovered, then block its admin pages.
+# Look up an application Heist discovered by its URL.
 data "heist_application" "api" {
   url = "https://api.example.com"
 }
 
-resource "heist_scope_rule" "block_api_admin" {
-  pattern = "${trimsuffix(split("://", data.heist_application.api.url)[1], "/")}/admin/**"
-  action  = "BLOCK"
+output "api" {
+  value = {
+    id              = data.heist_application.api.id
+    in_scope        = data.heist_application.api.in_scope
+    requires_review = data.heist_application.api.requires_review
+  }
 }
 
 # Look up an application by ID.

@@ -126,7 +126,7 @@ func (d *applicationDataSource) Read(ctx context.Context, req datasource.ReadReq
 // so this compares URLs itself.
 func (d *applicationDataSource) findByURL(ctx context.Context, appURL string, diags *diag.Diagnostics) (heist.Application, bool) {
 	var matches []heist.Application
-	for app, err := range d.client.AllApplications(ctx, heist.ListApplicationsParams{Size: &maxPageSize}) {
+	for app, err := range allApplications(ctx, d.client, heist.ListApplicationsParams{}) {
 		if err != nil {
 			diags.AddError("Unable to list applications", err.Error())
 			return heist.Application{}, false

@@ -79,7 +79,6 @@ func (d *applicationsDataSource) Read(ctx context.Context, req datasource.ReadRe
 	}
 
 	params := heist.ListApplicationsParams{
-		Size:           &maxPageSize,
 		InScope:        boolParam[heist.ListApplicationsParamsInScope](state.InScope),
 		RootOnly:       boolParam[heist.ListApplicationsParamsRootOnly](state.RootOnly),
 		RequiresReview: boolParam[heist.ListApplicationsParamsRequiresReview](state.RequiresReview),
@@ -94,7 +93,7 @@ func (d *applicationsDataSource) Read(ctx context.Context, req datasource.ReadRe
 	}
 
 	state.Applications = []applicationDataModel{}
-	for app, err := range d.client.AllApplications(ctx, params) {
+	for app, err := range allApplications(ctx, d.client, params) {
 		if err != nil {
 			resp.Diagnostics.AddError("Unable to list applications", err.Error())
 			return

@@ -1,8 +1,10 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"iter"
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -38,5 +40,22 @@ func parseID(id string, diags *diag.Diagnostics) (uuid.UUID, bool) {
 	return parsed, true
 }
 
-// maxPageSize is the largest page the API's list operations return.
-var maxPageSize = 100
+// allApplications yields every application matching params once, in the
+// largest pages the API returns. The list is paged by offset, so an
+// application added while paging can repeat the last one of a page.
+func allApplications(ctx context.Context, client *heist.ClientWithResponses, params heist.ListApplicationsParams) iter.Seq2[heist.Application, error] {
+	return func(yield func(heist.Application, error) bool) {
+		size := 100
+		params.Size = &size
+		seen := map[string]bool{}
+		for app, err := range client.AllApplications(ctx, params) {
+			if err == nil && seen[app.Id] {
+				continue
+			}
+			seen[app.Id] = true
+			if !yield(app, err) {
+				return
+			}
+		}
+	}
+}

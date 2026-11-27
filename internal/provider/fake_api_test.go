@@ -47,6 +47,10 @@ type fakeAPI struct {
 	issued map[string]bool
 	// exchanges counts client credentials exchanges at the token endpoint.
 	exchanges int
+	// discoverWhilePaging adds an application that sorts first before each
+	// request for page 2 of the application list, standing in for Heist
+	// discovering one while a client pages through the list.
+	discoverWhilePaging bool
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -179,6 +183,13 @@ func (f *fakeAPI) listApplications(w http.ResponseWriter, r *http.Request) {
 	if page < 1 || size < 1 || size > 100 {
 		writeError(w, http.StatusBadRequest, "invalid_page")
 		return
+	}
+	if page == 2 && f.discoverWhilePaging {
+		id := uuid.NewString()
+		f.apps[id] = &heist.Application{
+			Id: id, Url: "https://a-" + id + ".example.com/", CreatedAt: "2026-11-23T00:00:00Z",
+			Domain: "example.com", ParentApplicationIds: []string{},
+		}
 	}
 	matches := []heist.Application{}
 	for _, app := range f.apps {

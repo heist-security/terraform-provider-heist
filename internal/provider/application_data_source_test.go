@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/heist-security/heist-go/heist"
 )
 
@@ -195,4 +197,51 @@ func (f *fakeAPI) addApplication(app heist.Application) *heist.Application {
 	}
 	f.apps[app.Id] = &app
 	return &app
+}
+
+// An application added while the provider pages through the list shifts the
+// last item of page 1 onto page 2. Each application is still returned once.
+func TestApplicationDataSources_discoveredWhilePaging(t *testing.T) {
+	api := newFakeAPI(t)
+	var boundary *heist.Application
+	for i := range 101 {
+		app := api.addApplication(heist.Application{Url: fmt.Sprintf("https://sub%03d.example.com/", i)})
+		if i == 99 {
+			boundary = app
+		}
+	}
+	api.discoverWhilePaging = true
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProviderFactories(),
+		Steps: []resource.TestStep{{
+			Config: api.providerConfig() + `
+data "heist_application" "boundary" {
+  url = "https://sub099.example.com/"
+}
+
+data "heist_applications" "all" {}
+`,
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("data.heist_application.boundary", "id", boundary.Id),
+				checkUniqueApplicationIDs("data.heist_applications.all"),
+			),
+		}},
+	})
+}
+
+func checkUniqueApplicationIDs(name string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		attrs := s.RootModule().Resources[name].Primary.Attributes
+		n, _ := strconv.Atoi(attrs["applications.#"])
+		seen := map[string]bool{}
+		for i := range n {
+			id := attrs[fmt.Sprintf("applications.%d.id", i)]
+			if seen[id] {
+				return fmt.Errorf("%s lists application %s more than once", name, id)
+			}
+			seen[id] = true
+		}
+		return nil
+	}
 }
