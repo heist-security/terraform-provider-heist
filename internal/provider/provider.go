@@ -165,6 +165,8 @@ func (p *heistProvider) Resources(context.Context) []func() resource.Resource {
 
 func (p *heistProvider) DataSources(context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		newApplicationDataSource,
+		newApplicationsDataSource,
 		newCredentialDataSource,
 		newCredentialsDataSource,
 	}

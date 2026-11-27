@@ -37,3 +37,6 @@ func parseID(id string, diags *diag.Diagnostics) (uuid.UUID, bool) {
 	}
 	return parsed, true
 }
+
+// maxPageSize is the largest page the API's list operations return.
+var maxPageSize = 100

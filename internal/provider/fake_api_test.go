@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -58,6 +60,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /applications", f.createApplication)
+	mux.HandleFunc("GET /applications", f.listApplications)
 	mux.HandleFunc("GET /applications/{id}", f.getApplication)
 	mux.HandleFunc("POST /applications/{id}/scope", f.updateApplicationScope)
 	mux.HandleFunc("POST /scope/rules", f.createScopeRule)
@@ -158,9 +161,40 @@ func (f *fakeAPI) getApplication(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	writeJSON(w, http.StatusOK, heist.ApplicationDetail{
-		Id: app.Id, Url: app.Url, InScope: app.InScope, MainTarget: app.MainTarget, CreatedAt: app.CreatedAt,
-	})
+	// ApplicationDetail extends Application with fields the provider ignores.
+	writeJSON(w, http.StatusOK, app)
+}
+
+// listApplications filters applications like the API and returns one page,
+// ordered by URL.
+func (f *fakeAPI) listApplications(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page, size := 1, 25
+	if v := q.Get("page"); v != "" {
+		page, _ = strconv.Atoi(v)
+	}
+	if v := q.Get("size"); v != "" {
+		size, _ = strconv.Atoi(v)
+	}
+	if page < 1 || size < 1 || size > 100 {
+		writeError(w, http.StatusBadRequest, "invalid_page")
+		return
+	}
+	matches := []heist.Application{}
+	for _, app := range f.apps {
+		if v := q.Get("inScope"); v != "" && v != strconv.FormatBool(app.InScope) ||
+			q.Get("rootOnly") == "true" && len(app.ParentApplicationIds) > 0 ||
+			q.Get("requiresReview") != "" && q.Get("requiresReview") != strconv.FormatBool(app.RequiresReview) ||
+			q.Get("parentApplicationId") != "" && !slices.Contains(app.ParentApplicationIds, q.Get("parentApplicationId")) ||
+			!strings.Contains(strings.ToLower(app.Url), strings.ToLower(q.Get("search"))) {
+			continue
+		}
+		matches = append(matches, *app)
+	}
+	slices.SortFunc(matches, func(a, b heist.Application) int { return strings.Compare(a.Url, b.Url) })
+	start := min((page-1)*size, len(matches))
+	end := min(start+size, len(matches))
+	writeJSON(w, http.StatusOK, map[string]any{"items": matches[start:end], "page": page, "size": size, "total": len(matches)})
 }
 
 func (f *fakeAPI) updateApplicationScope(w http.ResponseWriter, r *http.Request) {
