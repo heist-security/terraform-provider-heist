@@ -285,7 +285,12 @@ func (f *fakeAPI) createCredential(w http.ResponseWriter, r *http.Request) {
 		h.MaskedKey, h.HeaderName = &masked, &body.ApiKey.HeaderName
 		c.secrets["apiKey"] = body.ApiKey.ApiKey
 	case "CUSTOM":
-		h.Email, h.Phone = &body.Custom.Email, body.Custom.Phone
+		// Like the API, assign an available Heist phone when none is set.
+		phone := "+15550000001"
+		if body.Custom.Phone != nil {
+			phone = *body.Custom.Phone
+		}
+		h.Email, h.Phone = &body.Custom.Email, &phone
 		names := []string{}
 		for _, s := range body.Custom.Secrets {
 			names = append(names, s.Name)

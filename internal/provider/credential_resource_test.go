@@ -119,6 +119,7 @@ resource "heist_credential" "test" {
 				Config: config("", "Sign in with the TOTP.", 1, "PASSWORD", "pw", "TOTP", "seed"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(credentialName, "custom.email", "tester-1@tester.heisthq.com"),
+					resource.TestCheckResourceAttr(credentialName, "custom.phone", "+15550000001"),
 					resource.TestCheckResourceAttr(credentialName, "hint.secret_names.#", "2"),
 					resource.TestCheckResourceAttrWith(credentialName, "id", func(v string) error {
 						id = v

@@ -329,7 +329,10 @@ func (r *credentialResource) Schema(_ context.Context, _ resource.SchemaRequest,
 						Description: "Heist email address. Generated when unset.",
 						Optional:    true, Computed: true, PlanModifiers: generated,
 					},
-					"phone":              schema.StringAttribute{Description: "Heist phone number.", Optional: true, PlanModifiers: replace},
+					"phone": schema.StringAttribute{
+						Description: "Heist phone number. Assigned by Heist when unset, if one is available.",
+						Optional:    true, Computed: true, PlanModifiers: generated,
+					},
 					"secrets_wo_version": version("Change to send every `secret` value again, in place."),
 				},
 				Blocks: map[string]schema.Block{
@@ -598,7 +601,7 @@ func (r *credentialResource) createBody(ctx context.Context, plan, config creden
 				Name  string `json:"name"`
 				Value string `json:"value"`
 			} `json:"secrets"`
-		}{Email: generatedEmail(plan.Custom.Email), Phone: plan.Custom.Phone.ValueStringPointer()}
+		}{Email: generatedEmail(plan.Custom.Email), Phone: knownStringPointer(plan.Custom.Phone)}
 		body.Custom.Secrets = make([]struct {
 			Name  string `json:"name"`
 			Value string `json:"value"`

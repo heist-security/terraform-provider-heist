@@ -76,8 +76,9 @@ masked API key and secret names, which appear in `hint`.
 
 EMAIL, MICROSOFT and CUSTOM credentials sign in with a Heist email address, and SMS credentials with a Heist phone
 number. If you don't set one, the provider requests an available one from Heist when it creates the credential and
-keeps it in state. Later applies don't request another. Changing the email or phone of a CUSTOM credential replaces
-it, because Heist keeps the contact details of an existing CUSTOM credential.
+keeps it in state. Heist also assigns an available phone to a CUSTOM credential that doesn't set one. Later applies
+don't request another. Changing the email or phone of a CUSTOM credential replaces it, because Heist keeps the
+contact details of an existing CUSTOM credential.
 
 ## Application links
 
@@ -170,7 +171,7 @@ Optional:
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
 - `email` (String) Heist email address. Generated when unset.
-- `phone` (String) Heist phone number.
+- `phone` (String) Heist phone number. Assigned by Heist when unset, if one is available.
 - `secret` (Block List) A named secret, such as a password or TOTP seed. Up to 20. (see [below for nested schema](#nestedblock--custom--secret))
 - `secrets_wo_version` (Number) Change to send every `secret` value again, in place.
 
